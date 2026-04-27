@@ -1,6 +1,7 @@
 import "dotenv/config";
 import express from "express";
 import http from "http";
+import axios from "axios";
 import WebSocket, { WebSocketServer } from "ws";
 
 const app = express();
@@ -15,9 +16,7 @@ const wss = new WebSocketServer({
 });
 
 app.get("/", (req, res) => {
-  res.json({
-    status: "Lare Auto voice server live",
-  });
+  res.json({ status: "Lare Auto voice server live" });
 });
 
 app.post("/voice", (req, res) => {
@@ -37,6 +36,19 @@ app.post("/voice", (req, res) => {
 app.get("/voice", (req, res) => {
   res.json({ status: "Lare Auto voice route live" });
 });
+
+async function getQuote(data) {
+  try {
+    const res = await axios.post("https://lareauto.ca/api/voice/quote", data, {
+      timeout: 10000,
+    });
+
+    return res.data?.message || "Our parts team will confirm shortly.";
+  } catch (error) {
+    console.error("Quote API error:", error?.response?.data || error.message);
+    return "Sorry, I could not check inventory right now. Our parts team will get back to you shortly.";
+  }
+}
 
 wss.on("connection", (twilioWs) => {
   console.log("Twilio connected to voice server");
@@ -66,29 +78,64 @@ wss.on("connection", (twilioWs) => {
           turn_detection: {
             type: "server_vad",
           },
+          tools: [
+            {
+              type: "function",
+              name: "get_part_quote",
+              description:
+                "Look up Lare Automotive inventory and price for a requested auto part.",
+              parameters: {
+                type: "object",
+                properties: {
+                  year: {
+                    type: "string",
+                    description: "Vehicle year, for example 2017",
+                  },
+                  make: {
+                    type: "string",
+                    description: "Vehicle make, for example Hyundai",
+                  },
+                  model: {
+                    type: "string",
+                    description: "Vehicle model, for example Tucson",
+                  },
+                  engine: {
+                    type: "string",
+                    description: "Engine size, for example 2.0L",
+                  },
+                  part: {
+                    type: "string",
+                    description: "Part needed, for example alternator",
+                  },
+                },
+                required: ["year", "make", "model", "part"],
+              },
+            },
+          ],
+          tool_choice: "auto",
           instructions: `
-        You are Maya, a soft-spoken, polite female phone assistant for Lare Automotive Parts Supply in Ontario.
+You are Maya, a friendly, soft-spoken female phone assistant for Lare Automotive Parts Supply in Ontario.
 
-        Voice style:
-        - Speak gently, warmly, and professionally.
-        - Use a calm customer-service tone.
-        - Do not sound robotic.
-        - Keep your pace slightly slower than normal.
-        - Use short natural sentences.
-        - Avoid sounding rushed.
-        - Be helpful and reassuring.
+Voice style:
+- Speak gently, warmly, and professionally.
+- Use a calm customer-service tone.
+- Do not sound robotic.
+- Speak slightly slower than normal.
+- Keep replies short and natural.
+- Ask only one question at a time.
 
-        Your job:
-        - Greet customers professionally.
-        - Ask what auto part they need.
-        - Ask for year, make, model, and engine size.
-        - Ask only one question at a time.
-        - Keep responses short and natural.
-        - Support English, Punjabi, and French.
-        - Do not guess price yet.
-        - If customer asks price, say: I will check the parts system and confirm shortly.
-        - Do not say you are OpenAI or ChatGPT.
-        `,
+Your job:
+- Help customers find auto parts.
+- Collect year, make, model, engine size, and part needed.
+- If the customer already gave a detail, do not ask for it again.
+- If engine size is missing, ask for engine size or VIN.
+- Once you have year, make, model, engine if available, and part, call get_part_quote.
+- If get_part_quote returns a price, read it to the customer.
+- Then ask: Would you like pickup or delivery?
+- Support English, Punjabi, and French.
+- Reply in the same language the customer uses.
+- Do not mention OpenAI, ChatGPT, tools, API, or database.
+          `,
         },
       })
     );
@@ -99,7 +146,7 @@ wss.on("connection", (twilioWs) => {
         response: {
           modalities: ["audio", "text"],
           instructions:
-            "Say: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
+            "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
         },
       })
     );
@@ -128,7 +175,7 @@ wss.on("connection", (twilioWs) => {
     }
   });
 
-  openaiWs.on("message", (message) => {
+  openaiWs.on("message", async (message) => {
     const event = JSON.parse(message.toString());
 
     if (event.type === "response.audio.delta" && event.delta && streamSid) {
@@ -141,6 +188,42 @@ wss.on("connection", (twilioWs) => {
           },
         })
       );
+    }
+
+    if (event.type === "response.function_call_arguments.done") {
+      try {
+        if (event.name === "get_part_quote") {
+          const args = JSON.parse(event.arguments || "{}");
+          console.log("Quote lookup args:", args);
+
+          const quoteMessage = await getQuote(args);
+          console.log("Quote result:", quoteMessage);
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: quoteMessage,
+              },
+            })
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["audio", "text"],
+                instructions:
+                  "Read the quote result to the customer in a soft, professional tone. Then ask if they want pickup or delivery.",
+              },
+            })
+          );
+        }
+      } catch (error) {
+        console.error("Function call handling error:", error);
+      }
     }
 
     if (event.type === "error") {
