@@ -68,7 +68,7 @@ async function saveVoiceLead(data) {
 function normalizePhone(phone) {
   if (!phone) return null;
 
-  let cleaned = String(phone).trim().replace(/[^\d+]/g, "");
+  const cleaned = String(phone).trim().replace(/[^\d+]/g, "");
 
   if (cleaned.startsWith("+")) return cleaned;
 
@@ -78,6 +78,22 @@ function normalizePhone(phone) {
   if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
 
   return cleaned;
+}
+
+function buildQuoteMessage(quoteMessage) {
+  return `${
+    quoteMessage || "Lare Automotive quote."
+  }
+
+Delivery charges and tax will be confirmed after postal code.
+
+Pay securely:
+https://lareauto.ca
+
+E-transfer:
+accounts@lareauto.ca
+
+Lare Automotive Parts Supply`;
 }
 
 async function sendQuoteSMS(to, message) {
@@ -98,10 +114,35 @@ async function sendQuoteSMS(to, message) {
       to: normalizedTo,
     });
 
-    return "Quote sent successfully.";
+    return "SMS quote sent successfully.";
   } catch (error) {
     console.error("SMS Error:", error?.message || error);
     return "Unable to send SMS right now.";
+  }
+}
+
+async function sendQuoteWhatsApp(to, message) {
+  try {
+    const normalizedTo = normalizePhone(to);
+
+    if (!normalizedTo) {
+      return "Unable to send WhatsApp because the phone number is missing.";
+    }
+
+    if (!process.env.TWILIO_WHATSAPP_NUMBER) {
+      return "Unable to send WhatsApp because Twilio WhatsApp number is not configured.";
+    }
+
+    await twilioClient.messages.create({
+      body: message,
+      from: process.env.TWILIO_WHATSAPP_NUMBER,
+      to: `whatsapp:${normalizedTo}`,
+    });
+
+    return "WhatsApp quote sent successfully.";
+  } catch (error) {
+    console.error("WhatsApp Error:", error?.message || error);
+    return "Unable to send WhatsApp right now.";
   }
 }
 
@@ -197,16 +238,22 @@ wss.on("connection", (twilioWs) => {
               parameters: {
                 type: "object",
                 properties: {
-                  phone: {
-                    type: "string",
-                    description:
-                      "Customer mobile number. Use caller phone if customer agrees to text the current number.",
-                  },
-                  message: {
-                    type: "string",
-                    description:
-                      "The SMS quote message including part quote, tax/delivery note, payment link, and e-transfer option.",
-                  },
+                  phone: { type: "string" },
+                  message: { type: "string" },
+                },
+                required: ["phone", "message"],
+              },
+            },
+            {
+              type: "function",
+              name: "send_quote_whatsapp",
+              description:
+                "Send a quote by WhatsApp to the customer phone number after the customer agrees.",
+              parameters: {
+                type: "object",
+                properties: {
+                  phone: { type: "string" },
+                  message: { type: "string" },
                 },
                 required: ["phone", "message"],
               },
@@ -241,11 +288,11 @@ Direct retail customer flow:
 - After giving the part price, do NOT ask for pickup.
 - Ask for postal code to calculate delivery charges plus tax.
 - Say: "May I have your postal code so I can let you know the total charges including delivery and tax?"
-- After quote is given, ask: "Would you like me to text this quote and payment information to your phone?"
-- If customer says yes, confirm whether to use the current calling number.
-- If customer gives another phone number, use that number.
-- Only after customer agrees, call send_quote_sms.
-- SMS message must include:
+- After quote is given, ask: "Would you like me to send this quote and payment information by text message or WhatsApp?"
+- If customer says SMS/text, confirm phone number and call send_quote_sms.
+- If customer says WhatsApp, confirm WhatsApp number and call send_quote_whatsapp.
+- Only send SMS or WhatsApp after customer agrees.
+- Message must include:
   - Lare Automotive Parts Supply
   - vehicle and part
   - quoted price
@@ -365,7 +412,7 @@ General rules:
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "Read the quote result to the caller in a soft, professional tone. If this is a retail customer, ask for their postal code to calculate delivery charges and tax. Do not ask for pickup. Then ask if they would like this quote and payment information sent by text message.",
+                  "Read the quote result to the caller in a soft, professional tone. If this is a retail customer, ask for their postal code to calculate delivery charges and tax. Do not ask for pickup. Then ask if they would like this quote and payment information sent by text message or WhatsApp.",
               },
             })
           );
@@ -393,11 +440,7 @@ General rules:
 
         if (event.name === "send_quote_sms") {
           const phoneToUse = args.phone || callerPhone;
-
-          const messageToSend =
-            args.message ||
-            `${lastQuoteMessage || "Lare Automotive quote."}\n\nDelivery charges and tax will be confirmed after postal code.\nPay securely: https://lareauto.ca\nE-transfer: accounts@lareauto.ca`;
-
+          const messageToSend = args.message || buildQuoteMessage(lastQuoteMessage);
           const smsResult = await sendQuoteSMS(phoneToUse, messageToSend);
 
           openaiWs.send(
@@ -418,6 +461,34 @@ General rules:
                 modalities: ["audio", "text"],
                 instructions:
                   "If SMS was sent successfully, tell the caller politely: I have texted the quote and payment information to you. If SMS failed, apologize and say our team will follow up shortly.",
+              },
+            })
+          );
+        }
+
+        if (event.name === "send_quote_whatsapp") {
+          const phoneToUse = args.phone || callerPhone;
+          const messageToSend = args.message || buildQuoteMessage(lastQuoteMessage);
+          const whatsAppResult = await sendQuoteWhatsApp(phoneToUse, messageToSend);
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: whatsAppResult,
+              },
+            })
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["audio", "text"],
+                instructions:
+                  "If WhatsApp was sent successfully, tell the caller politely: I have sent the quote and payment information on WhatsApp. If WhatsApp failed, apologize and offer to send it by text message instead.",
               },
             })
           );
