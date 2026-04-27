@@ -489,36 +489,41 @@ wss.on("connection", (twilioWs) => {
     );
   }
 
-  openaiWs.on("open", () => {
-    console.log("Connected to OpenAI Realtime");
-  });
+openaiWs.on("open", () => {
+  console.log("Connected to OpenAI Realtime");
 
-  twilioWs.on("message", (message) => {
-    const data = JSON.parse(message.toString());
+  // We wait for Twilio "start" event before sending session/update and greeting.
+});
 
-    if (data.event === "start") {
-      streamSid = data.start.streamSid;
+twilioWs.on("message", (message) => {
+  const data = JSON.parse(message.toString());
 
-      callerPhone =
-        data.start.customParameters?.From ||
-        data.start.customParameters?.from ||
-        data.start.from ||
-        data.start.caller ||
-        null;
+  if (data.event === "start") {
+    streamSid = data.start.streamSid;
 
-      direction = data.start.customParameters?.direction || "inbound";
-      shopName = data.start.customParameters?.shopName || "";
-      purpose = data.start.customParameters?.purpose || "";
+    callerPhone =
+      data.start.customParameters?.From ||
+      data.start.customParameters?.from ||
+      data.start.from ||
+      data.start.caller ||
+      null;
 
-      console.log("Twilio stream started:", {
-        streamSid,
-        callerPhone,
-        direction,
-        shopName,
-      });
+    direction = data.start.customParameters?.direction || "inbound";
+    shopName = data.start.customParameters?.shopName || "";
+    purpose = data.start.customParameters?.purpose || "";
 
-      if (openaiWs.readyState === WebSocket.OPEN) {
-        sendSessionUpdate();
+    console.log("Twilio stream started:", {
+      streamSid,
+      callerPhone,
+      direction,
+      shopName,
+    });
+
+    if (openaiWs.readyState === WebSocket.OPEN) {
+      sendSessionUpdate();
+
+      setTimeout(() => {
+        if (openaiWs.readyState !== WebSocket.OPEN) return;
 
         openaiWs.send(
           JSON.stringify({
@@ -527,28 +532,29 @@ wss.on("connection", (twilioWs) => {
               modalities: ["audio", "text"],
               instructions:
                 direction === "outbound"
-                  ? "Begin the outbound call politely using the outbound script."
+                  ? "Start speaking immediately. Say exactly: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
                   : "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
             },
           })
         );
-      }
+      }, 1200);
     }
+  }
 
-    if (data.event === "media" && openaiWs.readyState === WebSocket.OPEN) {
-      openaiWs.send(
-        JSON.stringify({
-          type: "input_audio_buffer.append",
-          audio: data.media.payload,
-        })
-      );
-    }
+  if (data.event === "media" && openaiWs.readyState === WebSocket.OPEN) {
+    openaiWs.send(
+      JSON.stringify({
+        type: "input_audio_buffer.append",
+        audio: data.media.payload,
+      })
+    );
+  }
 
-    if (data.event === "stop") {
-      console.log("Twilio stream stopped");
-      openaiWs.close();
-    }
-  });
+  if (data.event === "stop") {
+    console.log("Twilio stream stopped");
+    openaiWs.close();
+  }
+});
 
   openaiWs.on("message", async (message) => {
     const event = JSON.parse(message.toString());
