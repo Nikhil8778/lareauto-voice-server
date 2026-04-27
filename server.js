@@ -20,6 +20,24 @@ app.get("/", (req, res) => {
   });
 });
 
+app.post("/voice", (req, res) => {
+  const host = req.headers.host;
+
+  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Connect>
+    <Stream url="wss://${host}/twilio-media" />
+  </Connect>
+</Response>`;
+
+  res.type("text/xml");
+  res.send(twiml);
+});
+
+app.get("/voice", (req, res) => {
+  res.json({ status: "Lare Auto voice route live" });
+});
+
 wss.on("connection", (twilioWs) => {
   console.log("Twilio connected to voice server");
 
