@@ -331,7 +331,8 @@ wss.on("connection", (twilioWs) => {
   let purpose = "";
   let lastQuoteMessage = null;
   let lastDeliveryTaxMessage = null;
-
+  let sessionStarted = false;
+  
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
     {
