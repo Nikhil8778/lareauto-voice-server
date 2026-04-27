@@ -489,11 +489,37 @@ wss.on("connection", (twilioWs) => {
     );
   }
 
-openaiWs.on("open", () => {
-  console.log("Connected to OpenAI Realtime");
+  function startOpenAISessionIfReady() {
+  if (sessionStarted) return;
+  if (!streamSid) return;
+  if (openaiWs.readyState !== WebSocket.OPEN) return;
 
-  // We wait for Twilio "start" event before sending session/update and greeting.
-});
+  sessionStarted = true;
+
+  sendSessionUpdate();
+
+  setTimeout(() => {
+    if (openaiWs.readyState !== WebSocket.OPEN) return;
+
+    openaiWs.send(
+      JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["audio", "text"],
+          instructions:
+            direction === "outbound"
+              ? "Start speaking immediately. Say exactly: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
+              : "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
+        },
+      })
+    );
+  }, 1200);
+}
+
+        openaiWs.on("open", () => {
+        console.log("Connected to OpenAI Realtime");
+        startOpenAISessionIfReady();
+        });
 
 twilioWs.on("message", (message) => {
   const data = JSON.parse(message.toString());
@@ -519,26 +545,7 @@ twilioWs.on("message", (message) => {
       shopName,
     });
 
-    if (openaiWs.readyState === WebSocket.OPEN) {
-      sendSessionUpdate();
-
-      setTimeout(() => {
-        if (openaiWs.readyState !== WebSocket.OPEN) return;
-
-        openaiWs.send(
-          JSON.stringify({
-            type: "response.create",
-            response: {
-              modalities: ["audio", "text"],
-              instructions:
-                direction === "outbound"
-                  ? "Start speaking immediately. Say exactly: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
-                  : "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
-            },
-          })
-        );
-      }, 1200);
-    }
+    startOpenAISessionIfReady();
   }
 
   if (data.event === "media" && openaiWs.readyState === WebSocket.OPEN) {
