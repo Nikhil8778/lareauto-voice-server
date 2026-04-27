@@ -18,7 +18,7 @@ const twilioClient = twilio(
 
 const wss = new WebSocketServer({ server, path: "/twilio-media" });
 
-app.get("/", (req, res) => {
+app.get("/", (_req, res) => {
   res.json({ status: "Lare Auto voice server live" });
 });
 
@@ -35,7 +35,7 @@ app.post("/voice", (req, res) => {
   res.type("text/xml").send(twiml);
 });
 
-app.get("/voice", (req, res) => {
+app.get("/voice", (_req, res) => {
   res.json({ status: "Lare Auto voice route live" });
 });
 
@@ -49,6 +49,21 @@ async function getQuote(data) {
   } catch (error) {
     console.error("Quote API error:", error?.response?.data || error.message);
     return "Sorry, I could not check inventory right now. Our parts team will get back to you shortly.";
+  }
+}
+
+async function getDeliveryTax(data) {
+  try {
+    const res = await axios.post(
+      "https://lareauto.ca/api/voice/delivery-tax",
+      data,
+      { timeout: 10000 }
+    );
+
+    return res.data?.message || "Delivery and tax will be confirmed shortly.";
+  } catch (error) {
+    console.error("Delivery tax API error:", error?.response?.data || error.message);
+    return "Sorry, I could not calculate delivery and tax right now. Our parts team will confirm shortly.";
   }
 }
 
@@ -80,20 +95,18 @@ function normalizePhone(phone) {
   return cleaned;
 }
 
-function buildQuoteMessage(quoteMessage) {
-  return `${
-    quoteMessage || "Lare Automotive quote."
-  }
+function buildQuoteMessage(quoteMessage, deliveryTaxMessage) {
+  return `Lare Automotive Parts Supply
 
-Delivery charges and tax will be confirmed after postal code.
+${quoteMessage || "Quote details will be confirmed shortly."}
 
-Pay securely:
-https://lareauto.ca
+${deliveryTaxMessage || "Delivery charges and tax will be confirmed after postal code."}
+
+Pay online:
+https://lareauto.ca/quote
 
 E-transfer:
-accounts@lareauto.ca
-
-Lare Automotive Parts Supply`;
+accounts@lareauto.ca`;
 }
 
 async function sendQuoteSMS(to, message) {
@@ -152,6 +165,7 @@ wss.on("connection", (twilioWs) => {
   let streamSid = null;
   let callerPhone = null;
   let lastQuoteMessage = null;
+  let lastDeliveryTaxMessage = null;
 
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
@@ -190,6 +204,24 @@ wss.on("connection", (twilioWs) => {
                   part: { type: "string" },
                 },
                 required: ["year", "make", "model", "part"],
+              },
+            },
+            {
+              type: "function",
+              name: "get_delivery_tax",
+              description:
+                "Calculate delivery charge, HST, and final total after customer provides postal code.",
+              parameters: {
+                type: "object",
+                properties: {
+                  subtotalCents: {
+                    type: "number",
+                    description:
+                      "Parts subtotal in cents. For one item, use the quoted part price in cents. For multiple items, use combined parts subtotal in cents.",
+                  },
+                  postalCode: { type: "string" },
+                },
+                required: ["subtotalCents", "postalCode"],
               },
             },
             {
@@ -288,20 +320,19 @@ Direct retail customer flow:
 - After giving the part price, do NOT ask for pickup.
 - Ask for postal code to calculate delivery charges plus tax.
 - Say: "May I have your postal code so I can let you know the total charges including delivery and tax?"
-- After quote is given, ask: "Would you like me to send this quote and payment information by text message or WhatsApp?"
+- Once postal code is provided, call get_delivery_tax.
+- Read the delivery, HST, and total clearly.
+- Then ask: "Would you like me to send this quote and payment information by text message or WhatsApp?"
 - If customer says SMS/text, confirm phone number and call send_quote_sms.
 - If customer says WhatsApp, confirm WhatsApp number and call send_quote_whatsapp.
 - Only send SMS or WhatsApp after customer agrees.
 - Message must include:
   - Lare Automotive Parts Supply
   - vehicle and part
-  - quoted price
-  - note: delivery charges and tax will be confirmed after postal code
-  - secure payment link: https://lareauto.ca
-  - e-transfer option: accounts@lareauto.ca
-- If customer is ready to purchase, ask if they are comfortable paying online.
-- Say Lare Automotive can send a secure payment link.
-- Also mention e-transfer to accounts@lareauto.ca if they prefer.
+  - quoted part price
+  - delivery, HST, and total if available
+  - Pay online: https://lareauto.ca/quote
+  - E-transfer: accounts@lareauto.ca
 - Do not collect card numbers on the phone.
 
 Customer referred by mechanic:
@@ -412,7 +443,34 @@ General rules:
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "Read the quote result to the caller in a soft, professional tone. If this is a retail customer, ask for their postal code to calculate delivery charges and tax. Do not ask for pickup. Then ask if they would like this quote and payment information sent by text message or WhatsApp.",
+                  "Read the quote result to the caller in a soft, professional tone. Ask for postal code so delivery charges, HST, and final total can be calculated. Do not ask for pickup.",
+              },
+            })
+          );
+        }
+
+        if (event.name === "get_delivery_tax") {
+          const deliveryTaxMessage = await getDeliveryTax(args);
+          lastDeliveryTaxMessage = deliveryTaxMessage;
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: deliveryTaxMessage,
+              },
+            })
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["audio", "text"],
+                instructions:
+                  "Read the delivery, HST, and total to the caller in a soft, clear tone. Then ask if they would like this quote and payment information sent by text message or WhatsApp.",
               },
             })
           );
@@ -440,7 +498,9 @@ General rules:
 
         if (event.name === "send_quote_sms") {
           const phoneToUse = args.phone || callerPhone;
-          const messageToSend = args.message || buildQuoteMessage(lastQuoteMessage);
+          const messageToSend =
+            args.message || buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage);
+
           const smsResult = await sendQuoteSMS(phoneToUse, messageToSend);
 
           openaiWs.send(
@@ -468,7 +528,9 @@ General rules:
 
         if (event.name === "send_quote_whatsapp") {
           const phoneToUse = args.phone || callerPhone;
-          const messageToSend = args.message || buildQuoteMessage(lastQuoteMessage);
+          const messageToSend =
+            args.message || buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage);
+
           const whatsAppResult = await sendQuoteWhatsApp(phoneToUse, messageToSend);
 
           openaiWs.send(
