@@ -13,6 +13,8 @@ const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
+const MECHANIC_SIGNUP_URL = "https://lareauto.ca/mechanic-signup";
+
 const twilioClient = twilio(
   process.env.TWILIO_ACCOUNT_SID,
   process.env.TWILIO_AUTH_TOKEN
@@ -22,6 +24,10 @@ const wss = new WebSocketServer({ server, path: "/twilio-media" });
 
 app.get("/", (_req, res) => {
   res.json({ status: "Lare Auto voice server live" });
+});
+
+app.get("/voice", (_req, res) => {
+  res.json({ status: "Lare Auto voice route live" });
 });
 
 app.post("/voice", (req, res) => {
@@ -49,6 +55,13 @@ app.post("/outbound-call", async (req, res) => {
       });
     }
 
+    if (!process.env.TWILIO_PHONE_NUMBER) {
+      return res.status(500).json({
+        success: false,
+        message: "TWILIO_PHONE_NUMBER is not configured.",
+      });
+    }
+
     const host = req.headers.host;
 
     const call = await twilioClient.calls.create({
@@ -67,6 +80,7 @@ app.post("/outbound-call", async (req, res) => {
     });
   } catch (error) {
     console.error("Outbound call error:", error?.message || error);
+
     return res.status(500).json({
       success: false,
       message: "Could not start outbound call.",
@@ -76,28 +90,25 @@ app.post("/outbound-call", async (req, res) => {
 
 app.post("/outbound-voice", (req, res) => {
   const host = req.headers.host;
-  const shopName = req.query.shopName || "";
-  const purpose = req.query.purpose || "partnership_intro";
 
-  const safeShopName = String(shopName).replace(/"/g, "");
-  const safePurpose = String(purpose).replace(/"/g, "");
+  const shopName = String(req.query.shopName || "").replace(/"/g, "");
+  const purpose = String(req.query.purpose || "partnership_intro").replace(
+    /"/g,
+    ""
+  );
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="wss://${host}/twilio-media">
       <Parameter name="direction" value="outbound" />
-      <Parameter name="shopName" value="${safeShopName}" />
-      <Parameter name="purpose" value="${safePurpose}" />
+      <Parameter name="shopName" value="${shopName}" />
+      <Parameter name="purpose" value="${purpose}" />
     </Stream>
   </Connect>
 </Response>`;
 
   res.type("text/xml").send(twiml);
-});
-
-app.get("/voice", (_req, res) => {
-  res.json({ status: "Lare Auto voice route live" });
 });
 
 async function getQuote(data) {
@@ -109,6 +120,7 @@ async function getQuote(data) {
     return res.data?.message || "Our parts team will confirm shortly.";
   } catch (error) {
     console.error("Quote API error:", error?.response?.data || error.message);
+
     return "Sorry, I could not check inventory right now. Our parts team will get back to you shortly.";
   }
 }
@@ -123,7 +135,11 @@ async function getDeliveryTax(data) {
 
     return res.data?.message || "Delivery and tax will be confirmed shortly.";
   } catch (error) {
-    console.error("Delivery tax API error:", error?.response?.data || error.message);
+    console.error(
+      "Delivery tax API error:",
+      error?.response?.data || error.message
+    );
+
     return "Sorry, I could not calculate delivery and tax right now. Our parts team will confirm shortly.";
   }
 }
@@ -134,9 +150,15 @@ async function saveVoiceLead(data) {
       timeout: 10000,
     });
 
-    return `Lead saved successfully. Lead ID: ${res.data?.leadId || "unknown"}`;
+    return `Lead saved successfully. Lead ID: ${
+      res.data?.leadId || "unknown"
+    }`;
   } catch (error) {
-    console.error("Voice lead save error:", error?.response?.data || error.message);
+    console.error(
+      "Voice lead save error:",
+      error?.response?.data || error.message
+    );
+
     return "Lead could not be saved.";
   }
 }
@@ -153,7 +175,11 @@ async function saveOutboundLead(data) {
       res.data?.leadId || "unknown"
     }`;
   } catch (error) {
-    console.error("Outbound lead save error:", error?.response?.data || error.message);
+    console.error(
+      "Outbound lead save error:",
+      error?.response?.data || error.message
+    );
+
     return "Outbound lead could not be saved.";
   }
 }
@@ -187,13 +213,35 @@ E-transfer:
 accounts@lareauto.ca`;
 }
 
-async function sendQuoteSMS(to, message) {
+function buildMechanicSignupMessage(shopName = "") {
+  return `Lare Automotive Parts Supply
+
+Thank you for your time today${shopName ? `, ${shopName}` : ""}.
+
+You can apply for a mechanic/workshop partner account here:
+${MECHANIC_SIGNUP_URL}
+
+After admin approval, partner benefits may include:
+- Trade pricing
+- Quick parts quotes
+- WhatsApp/SMS support
+- Referral benefits
+- Delivery options
+
+Lare Automotive Parts Supply`;
+}
+
+async function sendSMS(to, message) {
   try {
     const normalizedTo = normalizePhone(to);
 
-    if (!normalizedTo) return "Unable to send SMS because the phone number is missing.";
-    if (!process.env.TWILIO_PHONE_NUMBER)
+    if (!normalizedTo) {
+      return "Unable to send SMS because the phone number is missing.";
+    }
+
+    if (!process.env.TWILIO_PHONE_NUMBER) {
       return "Unable to send SMS because Twilio phone number is not configured.";
+    }
 
     await twilioClient.messages.create({
       body: message,
@@ -201,20 +249,24 @@ async function sendQuoteSMS(to, message) {
       to: normalizedTo,
     });
 
-    return "SMS quote sent successfully.";
+    return "SMS sent successfully.";
   } catch (error) {
     console.error("SMS Error:", error?.message || error);
     return "Unable to send SMS right now.";
   }
 }
 
-async function sendQuoteWhatsApp(to, message) {
+async function sendWhatsApp(to, message) {
   try {
     const normalizedTo = normalizePhone(to);
 
-    if (!normalizedTo) return "Unable to send WhatsApp because the phone number is missing.";
-    if (!process.env.TWILIO_WHATSAPP_NUMBER)
+    if (!normalizedTo) {
+      return "Unable to send WhatsApp because the phone number is missing.";
+    }
+
+    if (!process.env.TWILIO_WHATSAPP_NUMBER) {
       return "Unable to send WhatsApp because Twilio WhatsApp number is not configured.";
+    }
 
     await twilioClient.messages.create({
       body: message,
@@ -222,7 +274,7 @@ async function sendQuoteWhatsApp(to, message) {
       to: `whatsapp:${normalizedTo}`,
     });
 
-    return "WhatsApp quote sent successfully.";
+    return "WhatsApp sent successfully.";
   } catch (error) {
     console.error("WhatsApp Error:", error?.message || error);
     return "Unable to send WhatsApp right now.";
@@ -236,40 +288,76 @@ You are Maya, a friendly, soft-spoken female phone assistant for Lare Automotive
 
 This is an OUTBOUND call to a mechanic, garage, body shop, or workshop.
 
+Very important conversation behavior:
+- Do not read long scripts.
+- Speak in short human sentences.
+- Ask only one question, then stop talking and wait.
+- After asking a question, do not answer for the customer.
+- Give the customer enough time to respond.
+- If the customer starts speaking, stop and listen.
+- Do not rush to the next question.
+- Use natural pauses.
+- Sound like a helpful receptionist, not a robot or sales recording.
+
 Voice style:
 - Speak gently, warmly, softly, and professionally.
 - Be respectful and brief.
-- Ask only one question at a time.
-- Do not sound robotic or pushy.
+- Use a calm pace.
+- Do not sound pushy.
+- Avoid sounding like you are reading.
 
-Opening:
-- Say: "Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
-- If shop name is available, say: "Am I speaking with ${shopName}?"
-- Say: "We work with local repair shops and auto businesses by supplying quality automotive parts such as alternators, starters, brakes, suspension parts, radiators, lights, and more."
-- Ask: "I was hoping to speak with the owner, manager, or the person who looks after parts purchasing. Would they be available?"
+Opening flow:
+1. Say: "Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
+2. Stop and wait for the answer.
+3. If shop name is available, say: "Am I speaking with ${shopName}?"
+4. Stop and wait.
+5. Say: "We supply auto parts like alternators, starters, brakes, suspension parts, radiators, and lights."
+6. Ask: "May I speak with the owner, manager, or whoever handles parts purchasing?"
+7. Stop and wait.
 
 Purpose:
 - The purpose is: ${purpose || "partnership_intro"}.
 - Ask if they regularly buy replacement auto parts.
 - Ask what parts they usually buy most often.
-- Ask if they would like Lare Automotive to send quick quotes when needed.
-- Ask for the best contact person, phone number, WhatsApp number, and email if possible.
-- Ask if they prefer SMS, WhatsApp, email, or phone call.
-- Classify the lead as hot, warm, callback, not_interested, or do_not_call.
-- If they ask to not be called again, apologize and mark doNotCall true.
-- Before ending the call, call save_outbound_lead silently with all details you collected.
+- Ask if they would like quick quotes when needed.
+- Ask for preferred contact method: WhatsApp, SMS, email, or phone.
+- Do not choose the contact method yourself. Wait for the customer to answer.
+- Collect contact person, phone, WhatsApp, email if possible.
+- Classify lead as hot, warm, callback, not_interested, or do_not_call.
+- Before ending the call, call save_outbound_lead silently with all details collected.
 - Do not tell them you are saving it.
 
-Lead status guide:
-- hot: interested and wants quote/account details soon.
-- warm: open to receiving information but not urgent.
-- callback: asks to call later.
-- not_interested: politely declined.
-- do_not_call: asked not to be contacted again.
+Mechanic signup link:
+- If the workshop says WhatsApp, SMS, or text is okay, ask permission to send the mechanic/workshop partner signup link.
+- If they agree and prefer WhatsApp, call send_mechanic_signup_whatsapp.
+- If they agree and prefer SMS/text, call send_mechanic_signup_sms.
+- Signup link: ${MECHANIC_SIGNUP_URL}
+- Explain that this is where they can apply for a mechanic/workshop account.
+- Say partner benefits may apply after admin approval.
+- Do not promise instant approval.
+- Do not promise a fixed discount.
+
+Pricing and margin handling:
+- If they ask about pricing, say:
+  "We try to keep pricing competitive for workshops. It depends on the part, brand, availability, and quantity."
+- If they ask about mechanic discount, say:
+  "For approved workshop partners, our team can confirm trade pricing after reviewing the shop account."
+- If they ask about margin, say:
+  "The exact margin depends on the part category and supplier cost, but our goal is to give shops room to stay competitive."
+- If they ask for a sample price, ask for year, make, model, engine, and part, then say our team can send a quote.
+- Do not promise a fixed discount.
+- Do not promise approval as a mechanic partner.
+- Do not discuss internal markup.
+
+Objection handling:
+- If they say they already have suppliers, say:
+  "Absolutely, many shops do. We can simply be an additional option when you want to compare price or availability."
+- If they say they are busy, say:
+  "No problem. What would be a better time for a quick callback?"
+- If they say not interested, politely thank them and end.
+- If they say do not call again, apologize, mark doNotCall true, and end.
 
 Rules:
-- Do not discuss discounts unless verified by the Lare Automotive team.
-- Do not promise approval as a mechanic partner.
 - Do not collect payment on outbound calls.
 - Do not mention OpenAI, ChatGPT, tools, API, database, or saving lead.
 - Support English, Punjabi, and French.
@@ -285,6 +373,7 @@ Voice style:
 - Speak slightly slower than normal.
 - Keep replies short and natural.
 - Ask only one question at a time.
+- After asking a question, stop and wait.
 
 Main job:
 - Greet customers nicely, softly, professionally, and friendly.
@@ -332,7 +421,7 @@ wss.on("connection", (twilioWs) => {
   let lastQuoteMessage = null;
   let lastDeliveryTaxMessage = null;
   let sessionStarted = false;
-  
+
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
     {
@@ -351,7 +440,12 @@ wss.on("connection", (twilioWs) => {
           voice: "shimmer",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
-          turn_detection: { type: "server_vad" },
+          turn_detection: {
+            type: "server_vad",
+            threshold: 0.5,
+            prefix_padding_ms: 500,
+            silence_duration_ms: 900,
+          },
           tools: [
             {
               type: "function",
@@ -477,6 +571,34 @@ wss.on("connection", (twilioWs) => {
                 required: ["phone", "message"],
               },
             },
+            {
+              type: "function",
+              name: "send_mechanic_signup_sms",
+              description:
+                "Send mechanic/workshop signup link by SMS after permission.",
+              parameters: {
+                type: "object",
+                properties: {
+                  phone: { type: "string" },
+                  shopName: { type: "string" },
+                },
+                required: ["phone"],
+              },
+            },
+            {
+              type: "function",
+              name: "send_mechanic_signup_whatsapp",
+              description:
+                "Send mechanic/workshop signup link by WhatsApp after permission.",
+              parameters: {
+                type: "object",
+                properties: {
+                  phone: { type: "string" },
+                  shopName: { type: "string" },
+                },
+                required: ["phone"],
+              },
+            },
           ],
           tool_choice: "auto",
           instructions: getInstructions({
@@ -491,78 +613,78 @@ wss.on("connection", (twilioWs) => {
   }
 
   function startOpenAISessionIfReady() {
-  if (sessionStarted) return;
-  if (!streamSid) return;
-  if (openaiWs.readyState !== WebSocket.OPEN) return;
-
-  sessionStarted = true;
-
-  sendSessionUpdate();
-
-  setTimeout(() => {
+    if (sessionStarted) return;
+    if (!streamSid) return;
     if (openaiWs.readyState !== WebSocket.OPEN) return;
 
-    openaiWs.send(
-      JSON.stringify({
-        type: "response.create",
-        response: {
-          modalities: ["audio", "text"],
-          instructions:
-            direction === "outbound"
-              ? "Start speaking immediately. Say exactly: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
-              : "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
-        },
-      })
-    );
-  }, 1200);
-}
+    sessionStarted = true;
 
-        openaiWs.on("open", () => {
-        console.log("Connected to OpenAI Realtime");
-        startOpenAISessionIfReady();
-        });
+    sendSessionUpdate();
 
-twilioWs.on("message", (message) => {
-  const data = JSON.parse(message.toString());
+    setTimeout(() => {
+      if (openaiWs.readyState !== WebSocket.OPEN) return;
 
-  if (data.event === "start") {
-    streamSid = data.start.streamSid;
+      openaiWs.send(
+        JSON.stringify({
+          type: "response.create",
+          response: {
+            modalities: ["audio", "text"],
+            instructions:
+              direction === "outbound"
+                ? "Say slowly and naturally: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today? Then stop speaking and wait for the customer."
+                : "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
+          },
+        })
+      );
+    }, 1200);
+  }
 
-    callerPhone =
-      data.start.customParameters?.From ||
-      data.start.customParameters?.from ||
-      data.start.from ||
-      data.start.caller ||
-      null;
-
-    direction = data.start.customParameters?.direction || "inbound";
-    shopName = data.start.customParameters?.shopName || "";
-    purpose = data.start.customParameters?.purpose || "";
-
-    console.log("Twilio stream started:", {
-      streamSid,
-      callerPhone,
-      direction,
-      shopName,
-    });
-
+  openaiWs.on("open", () => {
+    console.log("Connected to OpenAI Realtime");
     startOpenAISessionIfReady();
-  }
+  });
 
-  if (data.event === "media" && openaiWs.readyState === WebSocket.OPEN) {
-    openaiWs.send(
-      JSON.stringify({
-        type: "input_audio_buffer.append",
-        audio: data.media.payload,
-      })
-    );
-  }
+  twilioWs.on("message", (message) => {
+    const data = JSON.parse(message.toString());
 
-  if (data.event === "stop") {
-    console.log("Twilio stream stopped");
-    openaiWs.close();
-  }
-});
+    if (data.event === "start") {
+      streamSid = data.start.streamSid;
+
+      callerPhone =
+        data.start.customParameters?.From ||
+        data.start.customParameters?.from ||
+        data.start.from ||
+        data.start.caller ||
+        null;
+
+      direction = data.start.customParameters?.direction || "inbound";
+      shopName = data.start.customParameters?.shopName || "";
+      purpose = data.start.customParameters?.purpose || "";
+
+      console.log("Twilio stream started:", {
+        streamSid,
+        callerPhone,
+        direction,
+        shopName,
+      });
+
+      startOpenAISessionIfReady();
+    }
+
+    if (data.event === "media" && openaiWs.readyState === WebSocket.OPEN) {
+      openaiWs.send(
+        JSON.stringify({
+          type: "input_audio_buffer.append",
+          audio: data.media.payload,
+        })
+      );
+    }
+
+    if (data.event === "stop") {
+      console.log("Twilio stream stopped");
+      openaiWs.close();
+    }
+  });
 
   openaiWs.on("message", async (message) => {
     const event = JSON.parse(message.toString());
@@ -602,7 +724,7 @@ twilioWs.on("message", (message) => {
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "Read the quote result softly. Then ask for postal code for delivery, HST, and total. Do not ask for pickup.",
+                  "Read the quote result softly. Then ask for postal code for delivery, HST, and total. Do not ask for pickup. Ask one question and wait.",
               },
             })
           );
@@ -629,7 +751,7 @@ twilioWs.on("message", (message) => {
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "Read delivery, HST, and total clearly. Then ask if they want it sent by SMS or WhatsApp.",
+                  "Read delivery, HST, and total clearly. Then ask if they want it sent by SMS or WhatsApp. Ask one question and wait.",
               },
             })
           );
@@ -677,9 +799,10 @@ twilioWs.on("message", (message) => {
         }
 
         if (event.name === "send_quote_sms") {
-          const smsResult = await sendQuoteSMS(
+          const smsResult = await sendSMS(
             args.phone || callerPhone,
-            args.message || buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage)
+            args.message ||
+              buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage)
           );
 
           openaiWs.send(
@@ -706,9 +829,10 @@ twilioWs.on("message", (message) => {
         }
 
         if (event.name === "send_quote_whatsapp") {
-          const whatsAppResult = await sendQuoteWhatsApp(
+          const whatsAppResult = await sendWhatsApp(
             args.phone || callerPhone,
-            args.message || buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage)
+            args.message ||
+              buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage)
           );
 
           openaiWs.send(
@@ -733,6 +857,64 @@ twilioWs.on("message", (message) => {
             })
           );
         }
+
+        if (event.name === "send_mechanic_signup_sms") {
+          const smsResult = await sendSMS(
+            args.phone || callerPhone,
+            buildMechanicSignupMessage(args.shopName || shopName)
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: smsResult,
+              },
+            })
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["audio", "text"],
+                instructions:
+                  "If SMS succeeded, say: I have texted you the mechanic partner signup link. If it failed, apologize and say our team will follow up.",
+              },
+            })
+          );
+        }
+
+        if (event.name === "send_mechanic_signup_whatsapp") {
+          const whatsAppResult = await sendWhatsApp(
+            args.phone || callerPhone,
+            buildMechanicSignupMessage(args.shopName || shopName)
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: whatsAppResult,
+              },
+            })
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["audio", "text"],
+                instructions:
+                  "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
+              },
+            })
+          );
+        }
       } catch (error) {
         console.error("Function call handling error:", error);
       }
@@ -748,10 +930,13 @@ twilioWs.on("message", (message) => {
     if (openaiWs.readyState === WebSocket.OPEN) openaiWs.close();
   });
 
-  openaiWs.on("close", () => console.log("OpenAI Realtime disconnected"));
-  openaiWs.on("error", (error) =>
-    console.error("OpenAI WebSocket error:", error)
-  );
+  openaiWs.on("close", () => {
+    console.log("OpenAI Realtime disconnected");
+  });
+
+  openaiWs.on("error", (error) => {
+    console.error("OpenAI WebSocket error:", error);
+  });
 });
 
 server.listen(PORT, () => {
