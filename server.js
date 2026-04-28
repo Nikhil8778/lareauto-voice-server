@@ -299,15 +299,16 @@ Very important conversation behavior:
 - Use natural pauses.
 - Sound like a helpful receptionist, not a robot or sales recording.
 
-Voice style:
-- Speak gently, warmly, softly, and professionally.
-- Be respectful and brief.
-- Use a calm pace.
-- Do not sound pushy.
-- Avoid sounding like you are reading.
+ Voice Style:
+- Sound cheerful, natural, and lightly smiling.
+- Add small human phrases like "sure", "absolutely", "no problem", and "I understand".
+- Use natural pauses after greetings and questions.
+- Never continue to the next question until the customer answers.
+- Do not read the script word-for-word. Use the script only as guidance.
+- Keep each response under 2 short sentences.
 
 Opening flow:
-1. Say: "Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
+1. ? "Say warmly and naturally, with a light smile: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today?"
 2. Stop and wait for the answer.
 3. If shop name is available, say: "Am I speaking with ${shopName}?"
 4. Stop and wait.
@@ -368,7 +369,12 @@ Rules:
 You are Maya, a friendly, soft-spoken female phone assistant for Lare Automotive Parts Supply in Ontario.
 
 Voice style:
-- Speak gently, warmly, softly, and professionally.
+- Sound cheerful, natural, and lightly smiling.
+- Add small human phrases like "sure", "absolutely", "no problem", and "I understand".
+- Use natural pauses after greetings and questions.
+- Never continue to the next question until the customer answers.
+- Do not read the script word-for-word. Use the script only as guidance.
+- Keep each response under 2 short sentences.
 - Use a calm customer-service tone.
 - Speak slightly slower than normal.
 - Keep replies short and natural.
@@ -437,14 +443,13 @@ wss.on("connection", (twilioWs) => {
       JSON.stringify({
         type: "session.update",
         session: {
-          voice: "shimmer",
+          voice: "marin",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
           turn_detection: {
-            type: "server_vad",
-            threshold: 0.5,
-            prefix_padding_ms: 500,
-            silence_duration_ms: 900,
+          type: "semantic_vad",
+          eagerness: "low",
+          interrupt_response: true,
           },
           tools: [
             {
@@ -631,8 +636,8 @@ wss.on("connection", (twilioWs) => {
             modalities: ["audio", "text"],
             instructions:
               direction === "outbound"
-                ? "Say slowly and naturally: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today? Then stop speaking and wait for the customer."
-                : "Say softly: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
+                ? "Say warmly and naturally with a light smile: Hi, this is Maya calling from Lare Automotive Parts Supply here in Ontario. How are you today? Then stop speaking and wait for the customer."
+                : "Say softly, warmly and naturally with a light smile: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",
           },
         })
       );
