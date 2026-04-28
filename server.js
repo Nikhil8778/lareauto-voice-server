@@ -300,6 +300,39 @@ async function sendWhatsApp(to, message) {
   }
 }
 
+async function sendWhatsAppTemplate(to, shopName, signupLink) {
+  try {
+    const normalizedTo = normalizePhone(to);
+
+    if (!normalizedTo) {
+      return "Unable to send WhatsApp because the phone number is missing.";
+    }
+
+    const result = await twilioClient.messages.create({
+      from: process.env.TWILIO_WHATSAPP_NUMBER,
+      to: `whatsapp:${normalizedTo}`,
+      contentSid: "HX8e38952ef1e4768430481c5084263152",
+      contentVariables: JSON.stringify({
+        "1": shopName || "there",
+        "2": signupLink || "https://lareauto.ca/mechanic-signup",
+      }),
+    });
+
+    console.log("WhatsApp template sent:", result.sid);
+
+    return "WhatsApp sent successfully.";
+  } catch (error) {
+    console.error("WhatsApp Template Error:", {
+      message: error?.message,
+      code: error?.code,
+      status: error?.status,
+      moreInfo: error?.moreInfo,
+    });
+
+    return `Unable to send WhatsApp right now. ${error?.message || ""}`;
+  }
+}
+
 function getInstructions({ direction, callerPhone, shopName, purpose }) {
   if (direction === "outbound") {
     return `
