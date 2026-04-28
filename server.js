@@ -34,9 +34,10 @@ app.get("/voice", (_req, res) => {
 });
 
 app.get("/test-whatsapp", async (req, res) => {
-  const result = await sendWhatsApp(
+  const result = await sendWhatsAppTemplate(
     req.query.to,
-    "Test WhatsApp from Lare Automotive Parts Supply.\nhttps://lareauto.ca/mechanic-signup"
+    "ABC Auto Repair",
+    MECHANIC_SIGNUP_URL
   );
 
   res.send(result);
@@ -960,33 +961,34 @@ wss.on("connection", (twilioWs) => {
         }
 
         if (event.name === "send_mechanic_signup_whatsapp") {
-          const whatsAppResult = await sendWhatsApp(
-            args.phone || callerPhone,
-            buildMechanicSignupMessage(args.shopName || shopName)
-          );
+  const whatsAppResult = await sendWhatsAppTemplate(
+    args.phone || callerPhone,
+    args.shopName || shopName || "Auto Repair Shop",
+    MECHANIC_SIGNUP_URL
+  );
 
-          openaiWs.send(
-            JSON.stringify({
-              type: "conversation.item.create",
-              item: {
-                type: "function_call_output",
-                call_id: event.call_id,
-                output: whatsAppResult,
-              },
-            })
-          );
+  openaiWs.send(
+    JSON.stringify({
+      type: "conversation.item.create",
+      item: {
+        type: "function_call_output",
+        call_id: event.call_id,
+        output: whatsAppResult,
+      },
+    })
+  );
 
-          openaiWs.send(
-            JSON.stringify({
-              type: "response.create",
-              response: {
-                modalities: ["audio", "text"],
-                instructions:
-                  "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
-              },
-            })
-          );
-        }
+  openaiWs.send(
+    JSON.stringify({
+      type: "response.create",
+      response: {
+        modalities: ["audio", "text"],
+        instructions:
+          "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
+      },
+    })
+  );
+}
       } catch (error) {
         console.error("Function call handling error:", error);
       }
