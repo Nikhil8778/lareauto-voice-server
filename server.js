@@ -58,7 +58,7 @@ app.post("/voice", (req, res) => {
 
 app.post("/outbound-call", async (req, res) => {
   try {
-    const { to, shopName, purpose } = req.body || {};
+    const { to, shopName, purpose, workshopLeadId } = req.body || {};
     const normalizedTo = normalizePhone(to);
 
     if (!normalizedTo) {
@@ -81,10 +81,12 @@ app.post("/outbound-call", async (req, res) => {
       to: normalizedTo,
       from: process.env.TWILIO_PHONE_NUMBER,
       url: `https://${host}/outbound-voice?shopName=${encodeURIComponent(
-        shopName || ""
-      )}&purpose=${encodeURIComponent(purpose || "partnership_intro")}`,
+      shopName || ""
+      )}&purpose=${encodeURIComponent(
+      purpose || "partnership_intro"
+      )}&workshopLeadId=${encodeURIComponent(workshopLeadId || "")}`,
       method: "POST",
-    });
+   });
 
     return res.json({
       success: true,
@@ -110,6 +112,8 @@ app.post("/outbound-voice", (req, res) => {
     ""
   );
 
+  const workshopLeadId = String(req.query.workshopLeadId || "").replace(/"/g, "");
+
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
@@ -117,6 +121,7 @@ app.post("/outbound-voice", (req, res) => {
       <Parameter name="direction" value="outbound" />
       <Parameter name="shopName" value="${shopName}" />
       <Parameter name="purpose" value="${purpose}" />
+      <Parameter name="workshopLeadId" value="${workshopLeadId}" />
     </Stream>
   </Connect>
 </Response>`;
@@ -492,6 +497,7 @@ wss.on("connection", (twilioWs) => {
   let direction = "inbound";
   let shopName = "";
   let purpose = "";
+  let workshopLeadId = "";
   let lastQuoteMessage = null;
   let lastDeliveryTaxMessage = null;
   let sessionStarted = false;
@@ -733,12 +739,14 @@ wss.on("connection", (twilioWs) => {
       direction = data.start.customParameters?.direction || "inbound";
       shopName = data.start.customParameters?.shopName || "";
       purpose = data.start.customParameters?.purpose || "";
+      workshopLeadId = data.start.customParameters?.workshopLeadId || "";
 
       console.log("Twilio stream started:", {
         streamSid,
         callerPhone,
         direction,
         shopName,
+        workshopLeadId,
       });
 
       startOpenAISessionIfReady();
@@ -854,10 +862,11 @@ wss.on("connection", (twilioWs) => {
         if (event.name === "save_outbound_lead") {
           const saveResult = await saveOutboundLead({
             ...args,
+            workshopLeadId,
             shopName: args.shopName || shopName,
             phone: args.phone || callerPhone,
             purpose: args.purpose || purpose,
-          });
+            });
 
           openaiWs.send(
             JSON.stringify({
