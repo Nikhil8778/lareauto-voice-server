@@ -5,6 +5,9 @@ import axios from "axios";
 import WebSocket, { WebSocketServer } from "ws";
 import twilio from "twilio";
 
+process.on("uncaughtException", console.error);
+process.on("unhandledRejection", console.error);
+
 const app = express();
 app.use(express.json());
 
@@ -28,6 +31,15 @@ app.get("/", (_req, res) => {
 
 app.get("/voice", (_req, res) => {
   res.json({ status: "Lare Auto voice route live" });
+});
+
+app.get("/test-whatsapp", async (req, res) => {
+  const result = await sendWhatsApp(
+    req.query.to,
+    "Test WhatsApp from Lare Automotive Parts Supply.\nhttps://lareauto.ca/mechanic-signup"
+  );
+
+  res.send(result);
 });
 
 app.post("/voice", (req, res) => {
@@ -255,7 +267,6 @@ async function sendSMS(to, message) {
     return "Unable to send SMS right now.";
   }
 }
-
 async function sendWhatsApp(to, message) {
   try {
     const normalizedTo = normalizePhone(to);
@@ -268,16 +279,24 @@ async function sendWhatsApp(to, message) {
       return "Unable to send WhatsApp because Twilio WhatsApp number is not configured.";
     }
 
-    await twilioClient.messages.create({
+    const result = await twilioClient.messages.create({
       body: message,
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: `whatsapp:${normalizedTo}`,
     });
 
+    console.log("WhatsApp sent:", result.sid);
+
     return "WhatsApp sent successfully.";
   } catch (error) {
-    console.error("WhatsApp Error:", error?.message || error);
-    return "Unable to send WhatsApp right now.";
+    console.error("WhatsApp Error full:", {
+      message: error?.message,
+      code: error?.code,
+      status: error?.status,
+      moreInfo: error?.moreInfo,
+    });
+
+    return `Unable to send WhatsApp right now. ${error?.message || ""}`;
   }
 }
 
