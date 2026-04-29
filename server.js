@@ -58,7 +58,7 @@ app.post("/voice", (req, res) => {
 
 app.post("/outbound-call", async (req, res) => {
   try {
-    const { to, shopName, purpose, workshopLeadId } = req.body || {};
+    const { to, shopName, purpose, workshopLeadId, ivrDigits } = req.body || {};
     const normalizedTo = normalizePhone(to);
 
     if (!normalizedTo) {
@@ -80,6 +80,7 @@ app.post("/outbound-call", async (req, res) => {
     const call = await twilioClient.calls.create({
       to: normalizedTo,
       from: process.env.TWILIO_PHONE_NUMBER,
+      sendDigits: ivrDigits || undefined,
       url: `https://${host}/outbound-voice?shopName=${encodeURIComponent(
       shopName || ""
       )}&purpose=${encodeURIComponent(
