@@ -807,18 +807,25 @@ wss.on("connection", (twilioWs) => {
                 ? "Say warmly and naturally based on the current time: Good morning, good afternoon, or good evening. Then say: how are you doing today? Stop speaking completely and wait for the customer."
                 : "Say softly, warmly and naturally with a light smile: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",      
         }
-    })
-      );
-    }, 1000);
-  }
+            })
+            );
+            }, 1000);
+        }
 
-  openaiWs.on("open", () => {
-    console.log("Connected to OpenAI Realtime");
-    startOpenAISessionIfReady();
-  });
+        openaiWs.on("open", () => {
+            console.log("Connected to OpenAI Realtime");
+            startOpenAISessionIfReady();
+        });
 
-  twilioWs.on("message", (message) => {
-    const data = JSON.parse(message.toString());
+        twilioWs.on("message", (message) => {
+            let args = {};
+
+        try {
+        args = JSON.parse(toolCall.arguments || "{}");
+        } catch (err) {
+        console.error("❌ Tool args parse error:", toolCall.arguments);
+        return;
+        }
 
     if (data.event === "start") {
       streamSid = data.start.streamSid;
