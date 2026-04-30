@@ -589,13 +589,14 @@ wss.on("connection", (twilioWs) => {
       JSON.stringify({
         type: "session.update",
         session: {
-          voice: "nova",
+          voice: "coral",
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
           turn_detection: {
-          type: "semantic_vad",
-          eagerness: "low",
-          interrupt_response: true,
+          type: "server_vad",
+          threshold: 0.72,
+          prefix_padding_ms: 500,
+          silence_duration_ms: 850,
           },
           tools: [
             {
@@ -808,7 +809,7 @@ wss.on("connection", (twilioWs) => {
         }
     })
       );
-    }, 1200);
+    }, 1000);
   }
 
   openaiWs.on("open", () => {
