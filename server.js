@@ -871,7 +871,17 @@ wss.on("connection", (twilioWs) => {
   });
 
   openaiWs.on("message", async (message) => {
-    const event = JSON.parse(message.toString());
+    let event;
+
+        try {
+        event = JSON.parse(message.toString());
+        } catch (error) {
+        console.error("OpenAI message JSON parse error:", {
+            error: error?.message,
+            raw: message.toString(),
+        });
+        return;
+        }
 
     if (event.type === "response.audio.delta" && event.delta && streamSid) {
       twilioWs.send(
