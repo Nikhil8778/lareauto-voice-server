@@ -5,8 +5,15 @@ import axios from "axios";
 import WebSocket, { WebSocketServer } from "ws";
 import twilio from "twilio";
 
-process.on("uncaughtException", console.error);
-process.on("unhandledRejection", console.error);
+process.on("uncaughtException", (err) => {
+  console.error("UNCAUGHT EXCEPTION:", err);
+});
+
+process.on("unhandledRejection", (err) => {
+  console.error("UNHANDLED REJECTION:", err);
+});
+
+console.log("Step 1: server starting...");
 
 const app = express();
 app.use(express.json());
