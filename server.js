@@ -122,6 +122,7 @@ app.post("/outbound-voice", (req, res) => {
       <Parameter name="direction" value="outbound" />
       <Parameter name="shopName" value="${shopName}" />
       <Parameter name="purpose" value="${purpose}" />
+      <Parameter name="publicHost" value="${host}" />
       <Parameter name="workshopLeadId" value="${workshopLeadId}" />
     </Stream>
   </Connect>
@@ -200,6 +201,42 @@ async function saveOutboundLead(data) {
     );
 
     return "Outbound lead could not be saved.";
+  }
+}
+
+function cleanDigits(value) {
+  return String(value || "").replace(/[^0-9*#wW]/g, "");
+}
+
+async function sendDtmfDigit(callSid, digits, publicHost, shopName, purpose, workshopLeadId) {
+  try {
+    const safeDigits = cleanDigits(digits);
+
+    if (!callSid) return "Unable to press IVR option because call SID is missing.";
+    if (!safeDigits) return "Unable to press IVR option because digit is missing.";
+    if (!publicHost) return "Unable to press IVR option because public host is missing.";
+
+    await twilioClient.calls(callSid).update({
+      twiml: `<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Play digits="${safeDigits}" />
+  <Pause length="1" />
+  <Connect>
+    <Stream url="wss://${publicHost}/twilio-media">
+      <Parameter name="direction" value="outbound" />
+      <Parameter name="shopName" value="${String(shopName || "").replace(/"/g, "")}" />
+      <Parameter name="purpose" value="${String(purpose || "").replace(/"/g, "")}" />
+      <Parameter name="workshopLeadId" value="${String(workshopLeadId || "").replace(/"/g, "")}" />
+      <Parameter name="publicHost" value="${publicHost}" />
+    </Stream>
+  </Connect>
+</Response>`,
+    });
+
+    return `Pressed IVR option ${safeDigits}.`;
+  } catch (error) {
+    console.error("DTMF Error:", error?.message || error);
+    return `Unable to press IVR option. ${error?.message || ""}`;
   }
 }
 
@@ -441,6 +478,14 @@ Objection handling:
 - If they say not interested, politely thank them and end.
 - If they say do not call again, apologize, mark doNotCall true, and end.
 
+IVR handling:
+- If you hear an automated menu such as “Press 1”, “Press 2 for parts”, or “Press 0 for operator”, identify the correct option.
+- Prefer parts, purchasing, sales, front desk, or operator.
+- Use send_dtmf_digit to press the correct key.
+- If unsure, press 0 for operator.
+- After pressing the digit, wait quietly for the next person or next menu.
+- Do not speak over the IVR recording.
+
 Rules:
 - Do not collect payment on outbound calls.
 - Do not mention OpenAI, ChatGPT, tools, API, database, or saving lead.
@@ -522,10 +567,12 @@ wss.on("connection", (twilioWs) => {
   let direction = "inbound";
   let shopName = "";
   let purpose = "";
-  let workshopLeadId = "";
   let lastQuoteMessage = null;
   let lastDeliveryTaxMessage = null;
   let sessionStarted = false;
+  let twilioCallSid = null;
+  let publicHost = null;
+  let workshopLeadId = null;
 
   const openaiWs = new WebSocket(
     "wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview",
@@ -551,6 +598,27 @@ wss.on("connection", (twilioWs) => {
           interrupt_response: true,
           },
           tools: [
+            {
+             type: "function",
+             name: "send_dtmf_digit",
+             description: "Press a keypad digit during IVR menu, such as 1, 2, 0, *, #, or sequences like 2w1.",
+             parameters: {
+                    type: "object",
+                    properties: {
+                    digits: {
+                        type: "string",
+                        description: "DTMF digit or sequence to press. Example: 2, 0, 2w1.",
+                    },
+                    reason: {
+                        type: "string",
+                        description: "Why this digit was selected.",
+                    },
+                    },
+                    required: ["digits"],
+                },
+            },
+            
+            
             {
               type: "function",
               name: "get_part_quote",
@@ -764,7 +832,9 @@ wss.on("connection", (twilioWs) => {
       direction = data.start.customParameters?.direction || "inbound";
       shopName = data.start.customParameters?.shopName || "";
       purpose = data.start.customParameters?.purpose || "";
-      workshopLeadId = data.start.customParameters?.workshopLeadId || "";
+      twilioCallSid = data.start.callSid || null;
+      publicHost = data.start.customParameters?.publicHost || null;
+      workshopLeadId = data.start.customParameters?.workshopLeadId || null;
 
       console.log("Twilio stream started:", {
         streamSid,
@@ -995,34 +1065,57 @@ wss.on("connection", (twilioWs) => {
         }
 
         if (event.name === "send_mechanic_signup_whatsapp") {
-  const whatsAppResult = await sendWhatsAppTemplate(
-    args.phone || callerPhone,
-    args.shopName || shopName || "Auto Repair Shop",
-    MECHANIC_SIGNUP_URL
-  );
+            const whatsAppResult = await sendWhatsAppTemplate(
+                args.phone || callerPhone,
+                args.shopName || shopName || "Auto Repair Shop",
+                MECHANIC_SIGNUP_URL
+            );
 
-  openaiWs.send(
-    JSON.stringify({
-      type: "conversation.item.create",
-      item: {
-        type: "function_call_output",
-        call_id: event.call_id,
-        output: whatsAppResult,
-      },
-    })
-  );
+            openaiWs.send(
+                JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                    type: "function_call_output",
+                    call_id: event.call_id,
+                    output: whatsAppResult,
+                },
+                })
+            );
 
-  openaiWs.send(
-    JSON.stringify({
-      type: "response.create",
-      response: {
-        modalities: ["audio", "text"],
-        instructions:
-          "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
-      },
-    })
-  );
-}
+            openaiWs.send(
+                JSON.stringify({
+                type: "response.create",
+                response: {
+                    modalities: ["audio", "text"],
+                    instructions:
+                    "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
+                },
+                })
+            );
+         }
+
+       if (event.name === "send_dtmf_digit") {
+            const dtmfResult = await sendDtmfDigit(
+                twilioCallSid,
+                args.digits,
+                publicHost,
+                shopName,
+                purpose,
+                workshopLeadId
+            );
+
+            openaiWs.send(
+                JSON.stringify({
+                type: "conversation.item.create",
+                item: {
+                    type: "function_call_output",
+                    call_id: event.call_id,
+                    output: dtmfResult,
+                },
+                })
+            );
+        }
+
       } catch (error) {
         console.error("Function call handling error:", error);
       }
