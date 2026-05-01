@@ -20,7 +20,7 @@ app.use(express.json());
 
 const server = http.createServer(app);
 
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT;
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 
 const MECHANIC_SIGNUP_URL = "https://lareauto.ca/mechanic-signup";
@@ -1188,11 +1188,11 @@ wss.on("connection", (twilioWs) => {
     console.error("OpenAI WebSocket error:", error);
   });
 });
-
+console.log("Using PORT:", PORT);
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`Lare Auto voice server running on port ${PORT}`);
 });
 
 setInterval(() => {
-  console.log("Server still alive...");
-}, 10000); 
+  console.log("Server still heartbeat");
+}, 30000); 
