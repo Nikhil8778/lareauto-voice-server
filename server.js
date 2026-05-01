@@ -845,7 +845,17 @@ wss.on("connection", (twilioWs) => {
         });
 
         twilioWs.on("message", (message) => {
-         
+         let data;
+
+        try {
+        data = JSON.parse(message.toString());
+        } catch (error) {
+        console.error("Twilio message JSON parse error:", {
+          error: error?.message,
+          raw: message.toString(),
+        });
+        return;
+        }
         if (data.event === "start") {
       streamSid = data.start.streamSid;
 
