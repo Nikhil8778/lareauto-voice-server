@@ -14,6 +14,9 @@ process.on("unhandledRejection", (err) => {
 });
 
 console.log("Step 1: server starting...");
+setInterval(() => {
+  console.log("Server still alive...");
+}, 5000);
 
 const app = express();
 app.use(express.json());
