@@ -828,16 +828,8 @@ wss.on("connection", (twilioWs) => {
         });
 
         twilioWs.on("message", (message) => {
-            let args = {};
-
-        try {
-        args = JSON.parse(toolCall.arguments || "{}");
-        } catch (err) {
-        console.error("❌ Tool args parse error:", toolCall.arguments);
-        return;
-        }
-
-    if (data.event === "start") {
+         
+        if (data.event === "start") {
       streamSid = data.start.streamSid;
 
       callerPhone =
