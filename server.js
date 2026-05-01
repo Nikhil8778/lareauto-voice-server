@@ -275,18 +275,26 @@ async function sendDtmfDigit(
 function normalizePhone(phone) {
   if (!phone) return null;
 
-  const cleaned = String(phone).trim().replace(/[^\d+]/g, "");
+  let cleaned = String(phone).trim();
 
-  if (cleaned.startsWith("+")) return cleaned;
+  // remove everything except digits
+  let digits = cleaned.replace(/\D/g, "");
 
-  const digits = cleaned.replace(/\D/g, "");
+  // fix common duplication issue (like 11 + number)
+  if (digits.length === 12 && digits.startsWith("11")) {
+    digits = digits.slice(1);
+  }
 
-  if (digits.length === 10) return `+1${digits}`;
-  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  if (digits.length === 10) {
+    return `+1${digits}`;
+  }
 
-  return cleaned;
+  if (digits.length === 11 && digits.startsWith("1")) {
+    return `+${digits}`;
+  }
+
+  return `+${digits}`; // fallback (safer than returning broken number)
 }
-
 function buildQuoteMessage(quoteMessage, deliveryTaxMessage) {
   return `Lare Automotive Parts Supply
 
@@ -1187,4 +1195,4 @@ server.listen(PORT, "0.0.0.0", () => {
 
 setInterval(() => {
   console.log("Server still alive...");
-}, 10000);
+}, 10000); 
