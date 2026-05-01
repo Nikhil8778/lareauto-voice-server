@@ -1177,6 +1177,10 @@ wss.on("connection", (twilioWs) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
   console.log(`Lare Auto voice server running on port ${PORT}`);
 });
+
+setInterval(() => {
+  console.log("Server still alive...");
+}, 10000);
