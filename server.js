@@ -1,4 +1,4 @@
-//import "dotenv/config";
+// import "dotenv/config";
 import express from "express";
 import http from "http";
 import axios from "axios";
@@ -14,9 +14,6 @@ process.on("unhandledRejection", (err) => {
 });
 
 console.log("Step 1: server starting...");
-setInterval(() => {
-  console.log("Server still alive...");
-}, 5000);
 
 const app = express();
 app.use(express.json());
@@ -92,12 +89,14 @@ app.post("/outbound-call", async (req, res) => {
       from: process.env.TWILIO_PHONE_NUMBER,
       sendDigits: ivrDigits || undefined,
       url: `https://${host}/outbound-voice?shopName=${encodeURIComponent(
-      shopName || ""
+        shopName || ""
       )}&purpose=${encodeURIComponent(
-      purpose || "partnership_intro"
-      )}&workshopLeadId=${encodeURIComponent(workshopLeadId || "")}`,
+        purpose || "partnership_intro"
+      )}&workshopLeadId=${encodeURIComponent(
+        workshopLeadId || ""
+      )}&customerPhone=${encodeURIComponent(normalizedTo)}`,
       method: "POST",
-   });
+    });
 
     return res.json({
       success: true,
@@ -122,8 +121,8 @@ app.post("/outbound-voice", (req, res) => {
     /"/g,
     ""
   );
-
   const workshopLeadId = String(req.query.workshopLeadId || "").replace(/"/g, "");
+  const customerPhone = String(req.query.customerPhone || "").replace(/"/g, "");
 
   const twiml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
@@ -134,12 +133,28 @@ app.post("/outbound-voice", (req, res) => {
       <Parameter name="purpose" value="${purpose}" />
       <Parameter name="publicHost" value="${host}" />
       <Parameter name="workshopLeadId" value="${workshopLeadId}" />
+      <Parameter name="customerPhone" value="${customerPhone}" />
     </Stream>
   </Connect>
 </Response>`;
 
   res.type("text/xml").send(twiml);
 });
+
+function getOntarioGreeting() {
+  const hour = Number(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: "America/Toronto",
+      hour: "2-digit",
+      hour12: false,
+    }).format(new Date())
+  );
+
+  if (hour >= 5 && hour < 12) return "Good morning";
+  if (hour >= 12 && hour < 17) return "Good afternoon";
+  if (hour >= 17 && hour < 22) return "Good evening";
+  return "Hi";
+}
 
 async function getQuote(data) {
   try {
@@ -180,9 +195,7 @@ async function saveVoiceLead(data) {
       timeout: 10000,
     });
 
-    return `Lead saved successfully. Lead ID: ${
-      res.data?.leadId || "unknown"
-    }`;
+    return `Lead saved successfully. Lead ID: ${res.data?.leadId || "unknown"}`;
   } catch (error) {
     console.error(
       "Voice lead save error:",
@@ -218,7 +231,15 @@ function cleanDigits(value) {
   return String(value || "").replace(/[^0-9*#wW]/g, "");
 }
 
-async function sendDtmfDigit(callSid, digits, publicHost, shopName, purpose, workshopLeadId) {
+async function sendDtmfDigit(
+  callSid,
+  digits,
+  publicHost,
+  shopName,
+  purpose,
+  workshopLeadId,
+  customerPhone
+) {
   try {
     const safeDigits = cleanDigits(digits);
 
@@ -237,6 +258,7 @@ async function sendDtmfDigit(callSid, digits, publicHost, shopName, purpose, wor
       <Parameter name="shopName" value="${String(shopName || "").replace(/"/g, "")}" />
       <Parameter name="purpose" value="${String(purpose || "").replace(/"/g, "")}" />
       <Parameter name="workshopLeadId" value="${String(workshopLeadId || "").replace(/"/g, "")}" />
+      <Parameter name="customerPhone" value="${String(customerPhone || "").replace(/"/g, "")}" />
       <Parameter name="publicHost" value="${publicHost}" />
     </Stream>
   </Connect>
@@ -284,7 +306,10 @@ function buildMechanicSignupMessage(shopName = "") {
 
 Thank you for your time today${shopName ? `, ${shopName}` : ""}.
 
-You can apply for a mechanic/workshop partner account here:
+Website:
+https://lareauto.ca
+
+Mechanic signup:
 ${MECHANIC_SIGNUP_URL}
 
 After admin approval, partner benefits may include:
@@ -321,6 +346,7 @@ async function sendSMS(to, message) {
     return "Unable to send SMS right now.";
   }
 }
+
 async function sendWhatsApp(to, message) {
   try {
     const normalizedTo = normalizePhone(to);
@@ -362,13 +388,17 @@ async function sendWhatsAppTemplate(to, shopName, signupLink) {
       return "Unable to send WhatsApp because the phone number is missing.";
     }
 
+    if (!process.env.TWILIO_WHATSAPP_NUMBER) {
+      return "Unable to send WhatsApp because Twilio WhatsApp number is not configured.";
+    }
+
     const result = await twilioClient.messages.create({
       from: process.env.TWILIO_WHATSAPP_NUMBER,
       to: `whatsapp:${normalizedTo}`,
       contentSid: "HX8e38952ef1e4768430481c5084263152",
       contentVariables: JSON.stringify({
         "1": shopName || "there",
-        "2": signupLink || "https://lareauto.ca/mechanic-signup",
+        "2": signupLink || MECHANIC_SIGNUP_URL,
       }),
     });
 
@@ -387,70 +417,52 @@ async function sendWhatsAppTemplate(to, shopName, signupLink) {
   }
 }
 
-function getInstructions({ direction, callerPhone, shopName, purpose }) {
+function getInstructions({ direction, callerPhone, customerPhone, shopName, purpose }) {
   if (direction === "outbound") {
     return `
-You are Maya, a friendly, soft-spoken female phone assistant for Lare Automotive Parts Supply in Ontario.
+You are Maya, a friendly, natural phone assistant for Lare Automotive Parts Supply in Ontario.
 
 This is an OUTBOUND call to a mechanic, garage, body shop, or workshop.
 
-Very important conversation behavior:
+Conversation control:
 - Do not read long scripts.
-- Speak in short human sentences.
-- Ask only one question, then stop talking and wait.
-- After asking a question, do not answer for the customer.
-- Give the customer enough time to respond.
-- If the customer starts speaking, stop and listen.
-- Do not rush to the next question.
-- Use natural pauses.
-- Sound like a helpful receptionist, not a robot or sales recording.
+- Keep every reply short: one sentence, maximum two.
+- Ask only one question, then stop completely.
+- If the person starts speaking, stop and listen.
+- If the person says "hello", "yes", "wait", "one second", "let me speak", or interrupts, say only: "Sure, go ahead." Then stay silent.
+- Never jump to the next question while the person is answering.
+- Never answer your own question.
+- Do not restart the script if the person says hello again.
+- Do not ask for name and shop name together. Ask one thing at a time.
+- If you ask for shop name, wait until they finish before asking another question.
+- Sound like a helpful receptionist, not a sales recording.
 
- Voice Style:
+Voice style:
 - Sound cheerful, natural, and lightly smiling.
-- Add small human phrases like "sure", "absolutely", "no problem", and "I understand".
-- Use natural pauses after greetings and questions.
-- Never continue to the next question until the customer answers.
-- Do not read the script word-for-word. Use the script only as guidance.
-- Keep each response under 2 short sentences.
+- Use small human phrases only when appropriate: "sure", "absolutely", "no problem", "I understand".
+- Do not overuse these phrases.
+- Use natural pauses.
+- Do not sound like you are reading.
 
 Opening flow:
-1. Start based on time:
-   “Good morning, how are you doing today?”
-   or
-   “Good afternoon, how are you doing today?”
-   or
-   “Good evening, how are you doing today?”
+1. The system will provide the first greeting. Do not invent the time of day.
+2. After the person answers, say: "This is Maya calling from Lare Automotive Parts Supply. Have you got a quick minute?"
+3. Stop and wait.
+4. If they say yes, briefly say: "We supply parts like alternators, starters, brakes, suspension, radiators, lights, and more for local repair shops."
+5. Then ask: "Would it be helpful if we sent quick quotes when your shop needs parts?"
+6. Stop and wait.
 
-2. Stop and wait.
-
-3. Then say:
-   “This is Maya calling from Lare Automotive Parts Supply. Have you got a quick minute?”
-
-4. Stop and wait.
-
-5. If they say yes:
-   Briefly explain:
-   “We supply auto parts like alternators, starters, brakes, suspension parts, radiators, lights, and more. We support repair shops with quick quotes, competitive pricing, and delivery options.”
-
-6. If they say no / busy:
-   Say:
-   “No problem at all. I’ll send you our mechanic partner signup link by text so you can review it whenever convenient. Thank you.”
-   Then call send_mechanic_signup_sms.
+If customer refuses or says busy:
+- Do not push.
+- Say: "No problem at all. I can text you our website and mechanic partner signup link so you can review it later."
+- If they agree, call send_mechanic_signup_sms using the customer phone number.
+- If they do not agree, thank them and end.
 
 Purpose:
 - The purpose is: ${purpose || "partnership_intro"}.
 - Ask if they regularly buy replacement auto parts.
 - Ask what parts they usually buy most often.
 - Ask if they would like quick quotes when needed.
-If the customer refuses or says they are busy:
-- Do not push the conversation.
-- Politely end the call.
-- Send mechanic signup details by SMS to the same phone number if available.
-- SMS must include:
-  Lare Automotive Parts Supply
-  Website: https://lareauto.ca
-  Mechanic signup: https://lareauto.ca/mechanic-signup
-  Benefits: trade pricing after approval, quick quotes, WhatsApp/SMS support, referral benefits, delivery options.
 - Ask for preferred contact method: WhatsApp, SMS, email, or phone.
 - Do not choose the contact method yourself. Wait for the customer to answer.
 - Collect contact person, phone, WhatsApp, email if possible.
@@ -459,42 +471,38 @@ If the customer refuses or says they are busy:
 - Do not tell them you are saving it.
 
 Mechanic signup link:
-- If the workshop says WhatsApp, SMS, or text is okay, ask permission to send the mechanic/workshop partner signup link.
-- If they agree and prefer WhatsApp, call send_mechanic_signup_whatsapp.
-- If they agree and prefer SMS/text, call send_mechanic_signup_sms.
+- If the workshop asks for signup link or agrees to receive details, ask which method they prefer: WhatsApp or SMS.
+- If they prefer WhatsApp, confirm the WhatsApp number once.
+- Use customer phone if they say current number is okay.
+- Then call send_mechanic_signup_whatsapp.
+- If they prefer SMS/text, call send_mechanic_signup_sms.
 - Signup link: ${MECHANIC_SIGNUP_URL}
-- Explain that this is where they can apply for a mechanic/workshop account.
 - Say partner benefits may apply after admin approval.
 - Do not promise instant approval.
 - Do not promise a fixed discount.
 
 Pricing and margin handling:
-- If they ask about pricing, say:
-  "We try to keep pricing competitive for workshops. It depends on the part, brand, availability, and quantity."
-- If they ask about mechanic discount, say:
-  "For approved workshop partners, our team can confirm trade pricing after reviewing the shop account."
-- If they ask about margin, say:
-  "The exact margin depends on the part category and supplier cost, but our goal is to give shops room to stay competitive."
+- If they ask about pricing, say: "We try to keep pricing competitive for workshops. It depends on the part, brand, availability, and quantity."
+- If they ask about mechanic discount, say: "For approved workshop partners, our team can confirm trade pricing after reviewing the shop account."
+- If they ask about margin, say: "The exact margin depends on the part category and supplier cost, but our goal is to give shops room to stay competitive."
 - If they ask for a sample price, ask for year, make, model, engine, and part, then say our team can send a quote.
-- Do not promise a fixed discount.
-- Do not promise approval as a mechanic partner.
 - Do not discuss internal markup.
 
 Objection handling:
-- If they say they already have suppliers, say:
-  "Absolutely, many shops do. We can simply be an additional option when you want to compare price or availability."
-- If they say they are busy, say:
-  "No problem. What would be a better time for a quick callback?"
+- If they say they already have suppliers, say: "Absolutely, many shops do. We can simply be an additional option when you want to compare price or availability."
 - If they say not interested, politely thank them and end.
 - If they say do not call again, apologize, mark doNotCall true, and end.
 
 IVR handling:
-- If you hear an automated menu such as “Press 1”, “Press 2 for parts”, or “Press 0 for operator”, identify the correct option.
+- If you hear an automated menu such as "Press 1", "Press 2 for parts", or "Press 0 for operator", identify the correct option.
 - Prefer parts, purchasing, sales, front desk, or operator.
 - Use send_dtmf_digit to press the correct key.
 - If unsure, press 0 for operator.
-- After pressing the digit, wait quietly for the next person or next menu.
+- After pressing the digit, wait quietly.
 - Do not speak over the IVR recording.
+
+Known phone:
+- Customer/shop phone for this outbound call is: ${customerPhone || callerPhone || "unknown"}.
 
 Rules:
 - Do not collect payment on outbound calls.
@@ -508,19 +516,14 @@ You are Maya, a friendly, soft-spoken female phone assistant for Lare Automotive
 
 Voice style:
 - Sound cheerful, natural, and lightly smiling.
-- Add small human phrases like "sure", "absolutely", "no problem", and "I understand".
 - Use natural pauses after greetings and questions.
 - Never continue to the next question until the customer answers.
-- Do not read the script word-for-word. Use the script only as guidance.
 - Keep each response under 2 short sentences.
-- Use a calm customer-service tone.
-- Speak slightly slower than normal.
-- Keep replies short and natural.
 - Ask only one question at a time.
 - After asking a question, stop and wait.
+- If the customer says "wait", "one second", or "let me speak", say only: "Sure, go ahead." Then stay silent.
 
 Main job:
-- Greet customers nicely, softly, professionally, and friendly.
 - Help customers find auto parts.
 - Collect year, make, model, engine size, and part needed.
 - If the caller already gave a detail, do not ask for it again.
@@ -533,15 +536,9 @@ Contact sending rules:
 - Repeat the contact detail back to the customer.
 - Ask: "Did I get that right?"
 - Only send after customer confirms.
-- Never guess the phone number or email if unclear.
 
 Supplier objection:
-- If they say they already have suppliers, say:
-  "Absolutely, many shops already have suppliers. We’re not asking you to replace them. We can simply be an extra option when you want to compare price, availability, or need something quickly."
-
-Closing:
-- End with:
-  "Thank you so much for your time. We’d be happy to support your shop whenever you need parts. I’ll send the details over now, and our team will be here whenever you need a quick quote. Have a great day."
+- If they say they already have suppliers, say: "Absolutely, many shops already have suppliers. We’re not asking you to replace them. We can simply be an extra option when you want to compare price, availability, or need something quickly."
 
 Caller phone:
 - Caller phone may be: ${callerPhone || "unknown"}.
@@ -574,6 +571,7 @@ wss.on("connection", (twilioWs) => {
 
   let streamSid = null;
   let callerPhone = null;
+  let customerPhone = null;
   let direction = "inbound";
   let shopName = "";
   let purpose = "";
@@ -603,33 +601,32 @@ wss.on("connection", (twilioWs) => {
           input_audio_format: "g711_ulaw",
           output_audio_format: "g711_ulaw",
           turn_detection: {
-          type: "server_vad",
-          threshold: 0.72,
-          prefix_padding_ms: 500,
-          silence_duration_ms: 850,
+            type: "server_vad",
+            threshold: 0.72,
+            prefix_padding_ms: 500,
+            silence_duration_ms: 900,
           },
           tools: [
             {
-             type: "function",
-             name: "send_dtmf_digit",
-             description: "Press a keypad digit during IVR menu, such as 1, 2, 0, *, #, or sequences like 2w1.",
-             parameters: {
-                    type: "object",
-                    properties: {
-                    digits: {
-                        type: "string",
-                        description: "DTMF digit or sequence to press. Example: 2, 0, 2w1.",
-                    },
-                    reason: {
-                        type: "string",
-                        description: "Why this digit was selected.",
-                    },
-                    },
-                    required: ["digits"],
+              type: "function",
+              name: "send_dtmf_digit",
+              description:
+                "Press a keypad digit during IVR menu, such as 1, 2, 0, *, #, or sequences like 2w1.",
+              parameters: {
+                type: "object",
+                properties: {
+                  digits: {
+                    type: "string",
+                    description: "DTMF digit or sequence to press. Example: 2, 0, 2w1.",
+                  },
+                  reason: {
+                    type: "string",
+                    description: "Why this digit was selected.",
+                  },
                 },
+                required: ["digits"],
+              },
             },
-            
-            
             {
               type: "function",
               name: "get_part_quote",
@@ -724,6 +721,9 @@ wss.on("connection", (twilioWs) => {
                   notes: { type: "string" },
                   callbackTime: { type: "string" },
                   doNotCall: { type: "boolean" },
+                  preferredChannel: { type: "string" },
+                  signupLinkSent: { type: "boolean" },
+                  whatsappConfirmed: { type: "boolean" },
                 },
                 required: ["shopName", "leadStatus"],
               },
@@ -757,8 +757,7 @@ wss.on("connection", (twilioWs) => {
             {
               type: "function",
               name: "send_mechanic_signup_sms",
-              description:
-                "Send mechanic/workshop signup link by SMS after permission.",
+              description: "Send mechanic/workshop signup link by SMS after permission.",
               parameters: {
                 type: "object",
                 properties: {
@@ -772,7 +771,7 @@ wss.on("connection", (twilioWs) => {
               type: "function",
               name: "send_mechanic_signup_whatsapp",
               description:
-                "Send mechanic/workshop signup link by WhatsApp after permission.",
+                "Send mechanic/workshop signup link by WhatsApp template after permission.",
               parameters: {
                 type: "object",
                 properties: {
@@ -787,6 +786,7 @@ wss.on("connection", (twilioWs) => {
           instructions: getInstructions({
             direction,
             callerPhone,
+            customerPhone,
             shopName,
             purpose,
           }),
@@ -807,39 +807,42 @@ wss.on("connection", (twilioWs) => {
     setTimeout(() => {
       if (openaiWs.readyState !== WebSocket.OPEN) return;
 
+      const greeting = getOntarioGreeting();
+
       openaiWs.send(
         JSON.stringify({
           type: "response.create",
           response: {
             modalities: ["audio", "text"],
             instructions:
-            direction === "outbound"
-                ? "Say warmly and naturally based on the current time: Good morning, good afternoon, or good evening. Then say: how are you doing today? Stop speaking completely and wait for the customer."
-                : "Say softly, warmly and naturally with a light smile: Thank you for calling Lare Automotive Parts Supply. This is Maya. What vehicle and part are you looking for today?",      
-        }
-            })
-            );
-            }, 1000);
-        }
+              direction === "outbound"
+                ? `Say only this naturally: "${greeting}, how are you doing today?" Then stop completely and wait. Do not introduce yourself yet.`
+                : "Say naturally: Thanks for calling Lare Automotive Parts Supply, this is Maya. What vehicle and part are you looking for today?",
+          },
+        })
+      );
+    }, 1000);
+  }
 
-      openaiWs.on("open", () => {
-        console.log("Connected to OpenAI Realtime");
-        startOpenAISessionIfReady();
-        });
+  openaiWs.on("open", () => {
+    console.log("Connected to OpenAI Realtime");
+    startOpenAISessionIfReady();
+  });
 
-        twilioWs.on("message", (message) => {
-         let data;
+  twilioWs.on("message", (message) => {
+    let data;
 
-        try {
-        data = JSON.parse(message.toString());
-        } catch (error) {
-        console.error("Twilio message JSON parse error:", {
-          error: error?.message,
-          raw: message.toString(),
-        });
-        return;
-        }
-        if (data.event === "start") {
+    try {
+      data = JSON.parse(message.toString());
+    } catch (error) {
+      console.error("Twilio message JSON parse error:", {
+        error: error?.message,
+        raw: message.toString(),
+      });
+      return;
+    }
+
+    if (data.event === "start") {
       streamSid = data.start.streamSid;
 
       callerPhone =
@@ -847,6 +850,12 @@ wss.on("connection", (twilioWs) => {
         data.start.customParameters?.from ||
         data.start.from ||
         data.start.caller ||
+        null;
+
+      customerPhone =
+        data.start.customParameters?.customerPhone ||
+        data.start.customParameters?.to ||
+        callerPhone ||
         null;
 
       direction = data.start.customParameters?.direction || "inbound";
@@ -859,6 +868,7 @@ wss.on("connection", (twilioWs) => {
       console.log("Twilio stream started:", {
         streamSid,
         callerPhone,
+        customerPhone,
         direction,
         shopName,
         workshopLeadId,
@@ -885,15 +895,15 @@ wss.on("connection", (twilioWs) => {
   openaiWs.on("message", async (message) => {
     let event;
 
-        try {
-        event = JSON.parse(message.toString());
-        } catch (error) {
-        console.error("OpenAI message JSON parse error:", {
-            error: error?.message,
-            raw: message.toString(),
-        });
-        return;
-        }
+    try {
+      event = JSON.parse(message.toString());
+    } catch (error) {
+      console.error("OpenAI message JSON parse error:", {
+        error: error?.message,
+        raw: message.toString(),
+      });
+      return;
+    }
 
     if (event.type === "response.audio.delta" && event.delta && streamSid) {
       twilioWs.send(
@@ -930,7 +940,7 @@ wss.on("connection", (twilioWs) => {
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "Read the quote result softly. Then ask for postal code for delivery, HST, and total. Do not ask for pickup. Ask one question and wait.",
+                  "Acknowledge briefly, then read the quote result. Ask only one next question and wait.",
               },
             })
           );
@@ -989,9 +999,10 @@ wss.on("connection", (twilioWs) => {
             ...args,
             workshopLeadId,
             shopName: args.shopName || shopName,
-            phone: args.phone || callerPhone,
+            phone: args.phone || customerPhone || callerPhone,
+            whatsapp: args.whatsapp || customerPhone || null,
             purpose: args.purpose || purpose,
-            });
+          });
 
           openaiWs.send(
             JSON.stringify({
@@ -1007,7 +1018,7 @@ wss.on("connection", (twilioWs) => {
 
         if (event.name === "send_quote_sms") {
           const smsResult = await sendSMS(
-            args.phone || callerPhone,
+            args.phone || customerPhone || callerPhone,
             args.message ||
               buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage)
           );
@@ -1029,7 +1040,7 @@ wss.on("connection", (twilioWs) => {
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "If SMS succeeded, say the quote was texted. If it failed, apologize and say the team will follow up.",
+                  "If SMS succeeded, say briefly that it has been texted. If it failed, apologize and say the team will follow up.",
               },
             })
           );
@@ -1037,7 +1048,7 @@ wss.on("connection", (twilioWs) => {
 
         if (event.name === "send_quote_whatsapp") {
           const whatsAppResult = await sendWhatsApp(
-            args.phone || callerPhone,
+            args.phone || customerPhone || callerPhone,
             args.message ||
               buildQuoteMessage(lastQuoteMessage, lastDeliveryTaxMessage)
           );
@@ -1059,7 +1070,7 @@ wss.on("connection", (twilioWs) => {
               response: {
                 modalities: ["audio", "text"],
                 instructions:
-                  "If WhatsApp succeeded, say it was sent on WhatsApp. If it failed, offer SMS instead.",
+                  "If WhatsApp succeeded, say briefly that it was sent on WhatsApp. If it failed, offer SMS instead.",
               },
             })
           );
@@ -1067,7 +1078,7 @@ wss.on("connection", (twilioWs) => {
 
         if (event.name === "send_mechanic_signup_sms") {
           const smsResult = await sendSMS(
-            args.phone || callerPhone,
+            args.phone || customerPhone || callerPhone,
             buildMechanicSignupMessage(args.shopName || shopName)
           );
 
@@ -1095,57 +1106,57 @@ wss.on("connection", (twilioWs) => {
         }
 
         if (event.name === "send_mechanic_signup_whatsapp") {
-            const whatsAppResult = await sendWhatsAppTemplate(
-                args.phone || callerPhone,
-                args.shopName || shopName || "Auto Repair Shop",
-                MECHANIC_SIGNUP_URL
-            );
+          const whatsAppResult = await sendWhatsAppTemplate(
+            args.phone || customerPhone || callerPhone,
+            args.shopName || shopName || "Auto Repair Shop",
+            MECHANIC_SIGNUP_URL
+          );
 
-            openaiWs.send(
-                JSON.stringify({
-                type: "conversation.item.create",
-                item: {
-                    type: "function_call_output",
-                    call_id: event.call_id,
-                    output: whatsAppResult,
-                },
-                })
-            );
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: whatsAppResult,
+              },
+            })
+          );
 
-            openaiWs.send(
-                JSON.stringify({
-                type: "response.create",
-                response: {
-                    modalities: ["audio", "text"],
-                    instructions:
-                    "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
-                },
-                })
-            );
-         }
-
-       if (event.name === "send_dtmf_digit") {
-            const dtmfResult = await sendDtmfDigit(
-                twilioCallSid,
-                args.digits,
-                publicHost,
-                shopName,
-                purpose,
-                workshopLeadId
-            );
-
-            openaiWs.send(
-                JSON.stringify({
-                type: "conversation.item.create",
-                item: {
-                    type: "function_call_output",
-                    call_id: event.call_id,
-                    output: dtmfResult,
-                },
-                })
-            );
+          openaiWs.send(
+            JSON.stringify({
+              type: "response.create",
+              response: {
+                modalities: ["audio", "text"],
+                instructions:
+                  "If WhatsApp succeeded, say: I have sent the mechanic partner signup link on WhatsApp. If it failed, offer to send it by text message instead.",
+              },
+            })
+          );
         }
 
+        if (event.name === "send_dtmf_digit") {
+          const dtmfResult = await sendDtmfDigit(
+            twilioCallSid,
+            args.digits,
+            publicHost,
+            shopName,
+            purpose,
+            workshopLeadId,
+            customerPhone
+          );
+
+          openaiWs.send(
+            JSON.stringify({
+              type: "conversation.item.create",
+              item: {
+                type: "function_call_output",
+                call_id: event.call_id,
+                output: dtmfResult,
+              },
+            })
+          );
+        }
       } catch (error) {
         console.error("Function call handling error:", error);
       }
