@@ -825,23 +825,6 @@ wss.on("connection", (twilioWs) => {
       openaiWs.on("open", () => {
         console.log("Connected to OpenAI Realtime");
         startOpenAISessionIfReady();
-
-        setTimeout(() => {
-            if (openaiWs.readyState !== WebSocket.OPEN) return;
-
-            console.log("Forcing initial AI response test");
-
-            openaiWs.send(
-            JSON.stringify({
-                type: "response.create",
-                response: {
-                modalities: ["audio", "text"],
-                instructions:
-                    "Say warmly: Hello, thanks for calling Lare Auto. How can I help you today?",
-                },
-            })
-            );
-        }, 1000);
         });
 
         twilioWs.on("message", (message) => {
