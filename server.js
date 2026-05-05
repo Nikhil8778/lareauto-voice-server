@@ -104,6 +104,7 @@ app.post("/outbound-call", async (req, res) => {
   statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
 });
 
+
     return res.json({
       success: true,
       callSid: call.sid,
@@ -1023,7 +1024,7 @@ wss.on("connection", (twilioWs) => {
     phone: args.phone || customerPhone || callerPhone,
     whatsapp: args.whatsapp || customerPhone || null,
     purpose: args.purpose || purpose,
-    callSid: args.callSid || null,
+    callSid: args.callSid || twilioCallSid || null,
   });
 
           openaiWs.send(
