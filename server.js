@@ -88,6 +88,7 @@ app.post("/outbound-call", async (req, res) => {
   to: normalizedTo,
   from: process.env.TWILIO_PHONE_NUMBER,
   sendDigits: ivrDigits || undefined,
+
   url: `https://${host}/outbound-voice?shopName=${encodeURIComponent(
     shopName || ""
   )}&purpose=${encodeURIComponent(
@@ -95,6 +96,7 @@ app.post("/outbound-call", async (req, res) => {
   )}&workshopLeadId=${encodeURIComponent(
     workshopLeadId || ""
   )}&customerPhone=${encodeURIComponent(normalizedTo)}`,
+
   method: "POST",
 
   statusCallback: "https://lareauto.ca/api/twilio/call-status",
@@ -1013,16 +1015,16 @@ wss.on("connection", (twilioWs) => {
           );
         }
 
-        if (event.name === "save_outbound_lead") {
-          const saveResult = await saveOutboundLead({
-            ...args,
-            workshopLeadId,
-            shopName: args.shopName || shopName,
-            phone: args.phone || customerPhone || callerPhone,
-            whatsapp: args.whatsapp || customerPhone || null,
-            purpose: args.purpose || purpose,
-            callSid: callSid || args.callSid || null,
-          });
+      if (event.name === "save_outbound_lead") {
+  const saveResult = await saveOutboundLead({
+    ...args,
+    workshopLeadId,
+    shopName: args.shopName || shopName,
+    phone: args.phone || customerPhone || callerPhone,
+    whatsapp: args.whatsapp || customerPhone || null,
+    purpose: args.purpose || purpose,
+    callSid: args.callSid || null,
+  });
 
           openaiWs.send(
             JSON.stringify({
