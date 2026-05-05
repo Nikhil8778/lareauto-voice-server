@@ -85,18 +85,22 @@ app.post("/outbound-call", async (req, res) => {
     const host = req.headers.host;
 
     const call = await twilioClient.calls.create({
-      to: normalizedTo,
-      from: process.env.TWILIO_PHONE_NUMBER,
-      sendDigits: ivrDigits || undefined,
-      url: `https://${host}/outbound-voice?shopName=${encodeURIComponent(
-        shopName || ""
-      )}&purpose=${encodeURIComponent(
-        purpose || "partnership_intro"
-      )}&workshopLeadId=${encodeURIComponent(
-        workshopLeadId || ""
-      )}&customerPhone=${encodeURIComponent(normalizedTo)}`,
-      method: "POST",
-    });
+  to: normalizedTo,
+  from: process.env.TWILIO_PHONE_NUMBER,
+  sendDigits: ivrDigits || undefined,
+  url: `https://${host}/outbound-voice?shopName=${encodeURIComponent(
+    shopName || ""
+  )}&purpose=${encodeURIComponent(
+    purpose || "partnership_intro"
+  )}&workshopLeadId=${encodeURIComponent(
+    workshopLeadId || ""
+  )}&customerPhone=${encodeURIComponent(normalizedTo)}`,
+  method: "POST",
+
+  statusCallback: "https://lareauto.ca/api/twilio/call-status",
+  statusCallbackMethod: "POST",
+  statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+});
 
     return res.json({
       success: true,
@@ -1017,6 +1021,7 @@ wss.on("connection", (twilioWs) => {
             phone: args.phone || customerPhone || callerPhone,
             whatsapp: args.whatsapp || customerPhone || null,
             purpose: args.purpose || purpose,
+            callSid: callSid || args.callSid || null,
           });
 
           openaiWs.send(
